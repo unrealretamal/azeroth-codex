@@ -3,7 +3,7 @@ local panel = CreateFrame('Frame', 'CodexPixelBridgePanel', UIParent, 'BasicFram
 panel:SetSize(550,740); panel:SetPoint('CENTER'); panel:SetMovable(true); panel:EnableMouse(true)
 panel:RegisterForDrag('LeftButton')
 panel:SetScript('OnDragStart', panel.StartMoving); panel:SetScript('OnDragStop', panel.StopMovingOrSizing)
-panel.TitleText:SetText('Codex | Reply preview')
+panel.TitleText:SetText('Azeroth Codex | Reply preview')
 NS.Panel=panel
 local status=panel:CreateFontString(nil,'OVERLAY','GameFontNormalSmall')
 status:SetPoint('TOPLEFT',16,-34); status:SetText('Send a prompt. Replies update here while the companion is running.')
@@ -22,7 +22,7 @@ panel:SetScript('OnHide',function() edit:ClearFocus() end)
 function CodexPixelBridgeToggle()
     panel:SetShown(not panel:IsShown())
 end
-BINDING_HEADER_CODEXPIXELBRIDGE='Codex'
+BINDING_HEADER_CODEXPIXELBRIDGE='Azeroth Codex'
 BINDING_NAME_CODEXPIXELBRIDGE_TOGGLE='Show / hide Codex panel'
 local hide=CreateFrame('Button',nil,panel,'UIPanelButtonTemplate')
 hide:SetSize(70,22); hide:SetPoint('BOTTOMRIGHT',-16,10); hide:SetText('Hide')
@@ -37,7 +37,7 @@ else minimap:SetPoint('TOPRIGHT',UIParent,'TOPRIGHT',-24,-200) end
 minimap:SetScript('OnClick',CodexPixelBridgeToggle)
 minimap:SetScript('OnEnter',function(self)
     GameTooltip:SetOwner(self,'ANCHOR_LEFT')
-    GameTooltip:SetText('Codex')
+    GameTooltip:SetText('Azeroth Codex')
     GameTooltip:AddLine('Click to show or hide the chat panel.',1,1,1)
     GameTooltip:AddLine('Reply alerts come from the desktop companion.',1,0.82,0,true)
     GameTooltip:Show()

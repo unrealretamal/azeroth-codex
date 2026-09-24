@@ -8,7 +8,7 @@ local session,reading=nil,nil
 local consecutiveFailures,missedSlots=0,0
 local assembly=NS.NewNativeAssembly()
 local panel=NS.Panel
-panel.TitleText:SetText('Codex | Live text 0.4.7')
+panel.TitleText:SetText('Azeroth Codex | Live text 0.4.7')
 local body=CreateFrame('ScrollingMessageFrame',nil,panel)
 body:SetPoint('TOPLEFT',16,-118);body:SetSize(515,512)
 body:SetFontObject(GameFontHighlight);body:SetJustifyH('LEFT');body:SetFading(false);body:SetMaxLines(5000)

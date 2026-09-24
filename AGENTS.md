@@ -1,12 +1,12 @@
-# Agent guide: install and run WoW Forever Codex
+# Agent guide: install and run Azeroth Codex
 
 This is the repository-level entry point for agents. Use it when the user asks
 to install, run, update or troubleshoot the addon and companion. A request to
 edit documentation alone does not authorize reinstalling or restarting anything.
 
-Canonical repository: <https://github.com/0xInuarashi/wow-forever-codex>.
-The product name and addon folder remain **Forever Bridge** and
-**CodexPixelBridge**. Do not rename the addon folder to match the repository.
+Canonical repository: <https://github.com/unrealretamal/azeroth-codex>.
+The product name is **Azeroth Codex**. The addon folder remains
+**CodexPixelBridge** for compatibility; do not rename it to match the repository.
 
 ## What you are installing
 

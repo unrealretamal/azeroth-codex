@@ -93,7 +93,7 @@ class App:
         self.return_retry_at = 0
         self.strip_visible = None
         self.banner=ReplyBanner(root,self.open_reply)
-        root.title('Forever Bridge — companion replies')
+        root.title('Azeroth Codex — companion replies')
         self.job_status = tk.StringVar(value='Ready for a prompt')
         tk.Label(root,textvariable=self.job_status,font=('Segoe UI',14,'bold')).pack(anchor='w',padx=12,pady=(10,0))
         self.status = tk.StringVar(value='Capture paused.')
@@ -206,7 +206,7 @@ class App:
                 'failed':'Failed — details below','interrupted':'Interrupted — review before retrying'}
         label=labels.get(state,state)
         self.job_status.set(f'{label}  (prompt {key.rsplit(":",1)[-1]})')
-        self.root.title(f'Forever Bridge — {label}')
+        self.root.title(f'Azeroth Codex — {label}')
 
     def toggle(self):
         try:

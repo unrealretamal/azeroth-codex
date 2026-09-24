@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 720" role="img" aria-labelledby="title desc">
-  <title id="title">Forever Bridge</title>
+  <title id="title">Azeroth Codex</title>
   <desc id="desc">A visual map of the WoW Forever to Codex local transport.</desc>
   <rect width="1440" height="720" fill="#07101a"/>
   <path d="M0 525C255 425 390 655 672 541s426-32 768-216V720H0Z" fill="#0b2330"/>
@@ -11,8 +11,8 @@
   </g>
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
     <text x="110" y="112" fill="#72f5dc" font-size="18" letter-spacing="5">LOCAL NATIVE TRANSPORT / 0.4.7</text>
-    <text x="104" y="241" fill="#f3f7f8" font-size="98" font-weight="700" letter-spacing="-5">FOREVER</text>
-    <text x="104" y="333" fill="#f3f7f8" font-size="98" font-weight="700" letter-spacing="-5">BRIDGE</text>
+    <text x="104" y="241" fill="#f3f7f8" font-size="98" font-weight="700" letter-spacing="-5">AZEROTH</text>
+    <text x="104" y="333" fill="#f3f7f8" font-size="98" font-weight="700" letter-spacing="-5">CODEX</text>
     <text x="110" y="390" fill="#9fb6c0" font-size="22" letter-spacing=".4">WoW Forever and Codex, connected by documented APIs.</text>
   </g>
   <g transform="translate(110 466)">

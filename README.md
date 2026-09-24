@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/cover.svg" alt="Forever Bridge: WoW pixel strip, local Codex queue, and font metrics return path" width="100%">
+  <img src="docs/cover.svg" alt="Azeroth Codex: WoW pixel strip, local Codex queue, and font metrics return path" width="100%">
 </p>
 
-<h1 align="center">Forever Bridge</h1>
+<h1 align="center">Azeroth Codex</h1>
 
 <p align="center"><strong>Native, bounded chat between WoW: Forever and a local Codex process.</strong></p>
 
@@ -248,7 +248,7 @@ The preview limit is 60,000 UTF-8 bytes. The companion retains the full response
 
 The native channel has delivered real responses and completion notifications in the tested client. Shared placeholders delivered fresh bytes in two live experiments, and diagnostic font filenames were successfully reused after a full client restart. Full-bank recycling, startup performance and live use of slot 65,535 remain unverified. Native item-link mouse behavior and the split-stack fix still need broader live verification.
 
-**86 local tests pass**, including production Lua 5.1, real font measurements, consecutive multipart replies, the last slot and a clean-source installer. The initial GitHub Windows run also passed all 86 tests; [view that run](https://github.com/0xInuarashi/wow-forever-codex/actions/runs/35528904070). [Testing](docs/testing.md).
+**87 local tests pass**, including production Lua 5.1, real font measurements, consecutive multipart replies, the last slot, replacement-prompt slot retirement and a clean-source installer. [Testing](docs/testing.md).
 
 ## Local data
 
