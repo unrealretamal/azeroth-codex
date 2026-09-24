@@ -47,8 +47,14 @@ NS.PauseVisual=function()
 end
 NS.ResumeVisual=function() if request>0 then consecutiveFailures=0;watch() end end
 NS.OnPromptSubmitted=function(sequence)
-    -- A partially requested font must not be overwritten/reused after cancellation.
-    if reading then loaded=slot;slot=slot+1;reading=nil end
+    -- The active control may already have been captured and published for the
+    -- previous request, even before this client starts reading its font.
+    if active then
+        loaded=slot;slot=slot+1;reading=nil;deadline=GetTime()+6
+        if initialized then
+            CodexPixelBridgeState.nextFontSlotV2=math.max(tonumber(CodexPixelBridgeState.nextFontSlotV2) or 1,slot)
+        end
+    end
     request=sequence;assembly=NS.NewNativeAssembly();badge:SetText('');consecutiveFailures=0;missedSlots=0
     if NS.ClearReplyLinks then NS.ClearReplyLinks() end
     body:Clear();body:AddMessage('Waiting for Codex...');watch()

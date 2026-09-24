@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 720" role="img" aria-labelledby="title desc">
+  <title id="title">Forever Bridge</title>
+  <desc id="desc">A visual map of the WoW Forever to Codex local transport.</desc>
+  <rect width="1440" height="720" fill="#07101a"/>
+  <path d="M0 525C255 425 390 655 672 541s426-32 768-216V720H0Z" fill="#0b2330"/>
+  <path d="M0 584C255 484 390 714 672 600s426-32 768-216" fill="none" stroke="#1bd5bb" stroke-opacity=".35" stroke-width="2"/>
+  <g fill="none" stroke="#1bd5bb" stroke-opacity=".28">
+    <circle cx="1200" cy="135" r="214"/>
+    <circle cx="1200" cy="135" r="151"/>
+    <circle cx="1200" cy="135" r="88"/>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="110" y="112" fill="#72f5dc" font-size="18" letter-spacing="5">LOCAL NATIVE TRANSPORT / 0.4.7</text>
+    <text x="104" y="241" fill="#f3f7f8" font-size="98" font-weight="700" letter-spacing="-5">FOREVER</text>
+    <text x="104" y="333" fill="#f3f7f8" font-size="98" font-weight="700" letter-spacing="-5">BRIDGE</text>
+    <text x="110" y="390" fill="#9fb6c0" font-size="22" letter-spacing=".4">WoW Forever and Codex, connected by documented APIs.</text>
+  </g>
+  <g transform="translate(110 466)">
+    <rect width="260" height="110" rx="12" fill="#0b1924" stroke="#254352"/>
+    <text x="24" y="36" fill="#72f5dc" font-family="ui-monospace, monospace" font-size="13" letter-spacing="2">01 / GAME</text>
+    <text x="24" y="74" fill="#f3f7f8" font-family="ui-monospace, monospace" font-size="25">PIXEL STRIP</text>
+    <g fill="#72f5dc"><rect x="24" y="87" width="7" height="7"/><rect x="35" y="87" width="7" height="7"/><rect x="57" y="87" width="7" height="7"/><rect x="68" y="87" width="7" height="7"/><rect x="79" y="87" width="7" height="7"/></g>
+  </g>
+  <path d="M392 521H459" stroke="#72f5dc" stroke-width="2"/><path d="M451 514l10 7-10 7" fill="none" stroke="#72f5dc" stroke-width="2"/>
+  <g transform="translate(480 466)">
+    <rect width="260" height="110" rx="12" fill="#0b1924" stroke="#254352"/>
+    <text x="24" y="36" fill="#72f5dc" font-family="ui-monospace, monospace" font-size="13" letter-spacing="2">02 / DESKTOP</text>
+    <text x="24" y="74" fill="#f3f7f8" font-family="ui-monospace, monospace" font-size="25">CODEX QUEUE</text>
+    <path d="M25 90h116" stroke="#456673" stroke-width="4"/><path d="M25 90h72" stroke="#72f5dc" stroke-width="4"/>
+  </g>
+  <path d="M762 521H829" stroke="#72f5dc" stroke-width="2"/><path d="M821 514l10 7-10 7" fill="none" stroke="#72f5dc" stroke-width="2"/>
+  <g transform="translate(850 466)">
+    <rect width="260" height="110" rx="12" fill="#0b1924" stroke="#254352"/>
+    <text x="24" y="36" fill="#72f5dc" font-family="ui-monospace, monospace" font-size="13" letter-spacing="2">03 / RETURN</text>
+    <text x="24" y="74" fill="#f3f7f8" font-family="ui-monospace, monospace" font-size="25">FONT METRICS</text>
+    <path d="M25 94h12v-20h12v20h12v-34h12v34h12v-14h12v14" fill="none" stroke="#72f5dc" stroke-width="3"/>
+  </g>
+  <text x="111" y="657" fill="#607985" font-family="ui-monospace, monospace" font-size="14" letter-spacing="1.2">CHECKED UTF-8 PACKETS  /  FIRST-USE FONT SLOTS  /  NO PROCESS ACCESS</text>
+</svg>

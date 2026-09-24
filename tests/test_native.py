@@ -78,7 +78,7 @@ class NativeTests(unittest.TestCase):
         broken=bytearray(frame);broken[35]^=1
         self.assertIsNone(parse(bytes(broken),b'12345678',1,1)[0])
 
-    def test_two_actual_font_replies_render_native_text_then_stop_strip(self, _cached_prefix=0, _miss_slots=(), _item_links=False, _start_slot=4):
+    def test_two_actual_font_replies_render_native_text_then_stop_strip(self, _cached_prefix=0, _miss_slots=(), _item_links=False, _start_slot=4, _replace_before_read=False):
         lua=LuaRuntime(encoding=None);ns=lua.table();faces={};calls={}
         if _start_slot!=4:
             for i in range(_start_slot,min(BANK_SIZE+1,_start_slot+20)):
@@ -156,6 +156,18 @@ class NativeTests(unittest.TestCase):
         if not _cached_prefix:
             lua.globals()[b'newStartSlot']=_start_slot
             lua.execute(b'CodexPixelBridgeState.nextFontSlotV2=newStartSlot')
+        if _replace_before_read:
+            submit('first')
+            lua.execute(b"now=now+0.3;for _,w in ipairs(widgets) do if w.scripts.OnUpdate then w.scripts.OnUpdate(w,0.3) end end")
+            self.now=lua.globals()[b'now']
+            first_control=parse_control(ns[b'VisualControl'](bytes.fromhex('075bcd15000186a0')))
+            self.assertTrue(self.bridge.accept(first_control,{'id':first_control.session+':1','state':'waiting','reply':''}))
+            submit('second')
+            lua.execute(b"now=now+0.3;for _,w in ipairs(widgets) do if w.scripts.OnUpdate then w.scripts.OnUpdate(w,0.3) end end")
+            replacement=parse_control(ns[b'VisualControl'](bytes.fromhex('075bcd15000186a0')))
+            self.assertEqual((replacement.slot,replacement.loaded,replacement.request),(_start_slot+1,_start_slot,2))
+            self.assertEqual(lua.globals()[b'CodexPixelBridgeState'][b'nextFontSlotV2'],_start_slot+1)
+            return
         submit('first')
         first=run_reply(1,'First reply as normal text.')
         self.assertEqual(first.loaded,_cached_prefix+2 if _cached_prefix else _start_slot)
@@ -209,6 +221,9 @@ class NativeTests(unittest.TestCase):
 
     def test_three_missed_writes_keep_first_fragment_then_finish_without_manual_resume(self):
         self.test_two_actual_font_replies_render_native_text_then_stop_strip(_miss_slots=(6,7,8))
+
+    def test_new_prompt_retires_advertised_font_before_first_read(self):
+        self.test_two_actual_font_replies_render_native_text_then_stop_strip(_replace_before_read=True)
 
     def test_returned_item_link_crosses_font_packets_then_renders_as_a_native_link(self):
         self.test_two_actual_font_replies_render_native_text_then_stop_strip(_item_links=True)

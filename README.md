@@ -1,10 +1,38 @@
-# Forever Bridge
+<p align="center">
+  <img src="docs/cover.svg" alt="Forever Bridge: WoW pixel strip, local Codex queue, and font metrics return path" width="100%">
+</p>
 
-Version **0.4.7** — a native WoW: Forever chat panel connected to a local Codex process.
+<h1 align="center">Forever Bridge</h1>
 
-Prompts leave the game through an on-screen pixel strip. Replies return as checked bytes encoded in ordinary addon font metrics, then appear as normal scrollable text. Once installed and loaded, ordinary messages need no `/reload`.
+<p align="center"><strong>Native, bounded chat between WoW: Forever and a local Codex process.</strong></p>
 
-[How it works](#how-the-two-way-channel-works) · [Install](#install) · [Run the companion](#run-the-companion) · [Controls](#in-game-controls) · [Limits](#limits-and-verification)
+<p align="center">Version 0.4.7 · Experimental transport · Windows + NTFS · Python 3.12+</p>
+
+Prompts leave the game through a small on-screen pixel strip. Replies return as checked UTF-8 bytes encoded in ordinary addon font metrics, then render as normal scrollable text. The bridge uses documented addon APIs only: no injection, process-memory access, simulated input, or executable response payloads.
+
+> **Status:** verified in the tested Forever client. Finite first-use font slots and runtime behavior on other builds remain experimental.
+
+## Start Here
+
+| Goal | Read |
+| --- | --- |
+| Install or upgrade safely | [Agent installation guide](AGENTS.md) |
+| Understand the complete transport | [How it works](#how-the-two-way-channel-works) |
+| Set up the addon and companion | [Install](#install) and [Run the companion](#run-the-companion) |
+| Work on the codebase | [Development](docs/development.md) |
+| Verify changes or live behavior | [Testing](docs/testing.md) |
+| Inspect protocol and safety boundaries | [Architecture](docs/architecture.md) |
+| Understand storage and finite capacity | [Font bank](docs/font-bank.md) |
+| Review restart reuse evidence | [Font recycling experiment](docs/font-recycling.md) |
+
+## At A Glance
+
+| Direction | Carrier | Receiver |
+| --- | --- | --- |
+| WoW to companion | 128 x 4 pixel strip | Screen capture + checked packet decoder |
+| Companion to WoW | First-use TrueType font metrics | Documented `SetFont`, `SetText`, and `GetStringWidth` |
+
+Once installed and loaded, ordinary messages need no `/reload`.
 
 This is an experimental, finite transport built around documented addon APIs. It uses no DLL injection, game-process memory access, anti-cheat bypass, generated keyboard/mouse input or executable reply payloads. Using documented APIs does not imply Blizzard endorsement.
 
