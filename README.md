@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/cover.svg" alt="Azeroth Codex: WoW pixel strip, local Codex queue, and font metrics return path" width="100%">
+  <img src="docs/cover.png" alt="Azeroth Codex: WoW pixel strip, local Codex queue, and font metrics return path" width="100%">
 </p>
 
 <h1 align="center">Azeroth Codex</h1>
