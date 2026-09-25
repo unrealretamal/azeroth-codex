@@ -9,6 +9,7 @@ local status=panel:CreateFontString(nil,'OVERLAY','GameFontNormalSmall')
 status:SetPoint('TOPLEFT',16,-34); status:SetText('Send a prompt. Replies update here while the companion is running.')
 NS.SetStatus=function(text) status:SetText(text) end
 local history=CreateFrame('ScrollingMessageFrame',nil,panel)
+NS.PromptHistory=history
 history:SetPoint('TOPLEFT',16,-58); history:SetSize(515,48); history:SetFontObject(GameFontHighlightSmall)
 history:SetJustifyH('LEFT'); history:SetMaxLines(100); history:EnableMouseWheel(true)
 history:SetFading(false)
@@ -78,12 +79,15 @@ for i=0,511 do
     t:SetColorTexture(0,0,0,1); cells[i+1]=t
 end
 local session=NS.U32(GetServerTime())..NS.U32(math.floor(GetTime()*1000)%4294967296)
+NS.SessionHex=''
+for i=1,#session do NS.SessionHex=NS.SessionHex..string.format('%02x',session:byte(i)) end
 local messages, frames, cursor, sequence, elapsed = {}, {}, 1, 0, 0
 local controlTurn=false
 local lastData
 local activeChat='default'
 local function normalizeChat(value)
     value=tostring(value or ''):lower():gsub('[^a-z0-9_-]','')
+    value=value:gsub('^[^a-z0-9]+','')
     if value=='' then return 'default' end
     return value:sub(1,32)
 end
@@ -94,9 +98,13 @@ NS.ChatPrefix=function()
     return string.char(30)..'chat='..activeChat..string.char(31)
 end
 NS.SetActiveChat=function(value)
-    activeChat=normalizeChat(value)
+    local previousChat=activeChat
+    local selected=normalizeChat(value)
+    if NS.CanSelectChat and not NS.CanSelectChat(selected) then return end
+    activeChat=selected
     if CodexPixelBridgeState then CodexPixelBridgeState.activeChatV1=activeChat end
     NS.SetStatus('Active chat: '..activeChat)
+    if NS.OnChatSelected then NS.OnChatSelected(activeChat,previousChat) end
 end
 local chatState=CreateFrame('Frame')
 chatState:RegisterEvent('ADDON_LOADED')
@@ -105,23 +113,40 @@ chatState:SetScript('OnEvent',function(_,_,name)
     CodexPixelBridgeState=CodexPixelBridgeState or {}
     activeChat=normalizeChat(CodexPixelBridgeState.activeChatV1)
 end)
+local function rebuild()
+    frames={}
+    for _,group in ipairs(messages) do for _,frame in ipairs(group.frames) do frames[#frames+1]=frame end end
+    cursor=1
+end
+NS.AcknowledgePrompt=function(id)
+    for i=#messages,1,-1 do if messages[i].id==id then table.remove(messages,i) end end
+    rebuild()
+end
+NS.SendWire=function(wire,text,operation)
+    if #wire>1280 then
+        status:SetText('Message plus item details is too long. Shorten it or link fewer items.');return false
+    end
+    if #messages>=8 then status:SetText('Eight messages await bridge receipt. Keep the strip visible.');return false end
+    sequence=sequence+1
+    local id=NS.SessionHex..':'..sequence
+    messages[#messages+1]={id=id,frames=NS.Encode(wire,session,sequence)}
+    rebuild()
+    if operation=='send' then history:AddMessage('You #'..sequence..' ['..activeChat..']: '..text:gsub('|','||')) end
+    if NS.RecordChatRequest then NS.RecordChatRequest(id,activeChat,text,operation) end
+    status:SetText('Prompt #'..sequence..' broadcasting. Strip activity means preview checks, not agent progress.')
+    if NS.OnPromptSubmitted then NS.OnPromptSubmitted(sequence,activeChat) end
+    return true
+end
+NS.SendChatOperation=function(operation,text)
+    text=text or ''
+    return NS.SendWire(string.char(30)..'ac2'..string.char(31)..activeChat..string.char(31)..operation..string.char(31)..text,text,operation)
+end
 local function submit()
     local text=edit:GetText()
     if not text:find('%S') then return end
     if NS.MakePromptText then text=NS.MakePromptText(text) end
     local wire=(NS.ChatPrefix and NS.ChatPrefix() or '')..text
-    if #wire>1280 then
-        status:SetText('Message plus item details is too long. Shorten it or link fewer items.');return
-    end
-    sequence=sequence+1
-    messages[#messages+1]=NS.Encode(wire,session,sequence)
-    if #messages>8 then table.remove(messages,1) end
-    frames={}
-    for _, group in ipairs(messages) do for _, frame in ipairs(group) do frames[#frames+1]=frame end end
-    cursor=1
-    history:AddMessage('You #'..sequence..' ['..activeChat..']: '..text:gsub('|','||'))
-    status:SetText('Prompt #'..sequence..' broadcasting. Strip activity means preview checks, not agent progress.')
-    if NS.OnPromptSubmitted then NS.OnPromptSubmitted(sequence,activeChat) end
+    if not NS.SendWire(wire,text,'send') then return end
     edit:SetText(''); edit:ClearFocus()
 end
 send:SetScript('OnClick',submit); edit:SetScript('OnEnterPressed',submit)
@@ -148,6 +173,7 @@ end)
 SLASH_CODEXPIXELBRIDGE1='/cpb'
 SLASH_CODEXPIXELBRIDGE2='/codex'
 SlashCmdList.CODEXPIXELBRIDGE=function(arg)
+    if NS.ChatCommand and NS.ChatCommand(arg:match('^%s*(.-)%s*$')) then return end
     arg=arg:lower():match('^%s*(.-)%s*$')
     if arg=='show' then panel:Show(); return end
     if arg=='hide' then panel:Hide(); return end

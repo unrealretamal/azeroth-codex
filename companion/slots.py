@@ -76,8 +76,40 @@ def make_inbox(snapshot, control):
         f'  state = {_lua_string(state)},\n'
         f'  revision = {int(revision)},\n'
         f'  text = {_lua_string(text)},\n'
+        + make_bundle(snapshot) +
         '}\n'
     ).encode('utf-8')
+
+
+def make_bundle(snapshot):
+    if 'chats' not in snapshot:
+        return ''
+    rows = []
+    def short(value, size):
+        raw=str(value).encode('utf-8')
+        if len(raw)<=size: return str(value)
+        return raw[:size-70].decode('utf-8', errors='ignore')+'\n[Preview shortened; select chat and Sync for latest full reply.]'
+    for chat in snapshot['chats'][:16]:
+        rows.append(['profile', chat['id'], chat['title'], chat['project'], chat['backend'], chat['sandbox']])
+        for i,message in enumerate(chat['messages'][-8:]):
+            maximum=60000 if chat['id']==snapshot.get('chat') and i==len(chat['messages'][-8:])-1 else 3000
+            rows.append(['message', chat['id'], message['id'], message['state'],
+                         short(message['prompt'], 1280), short(message['text'], maximum)])
+    for receipt in snapshot.get('receipts', [])[:32]:
+        rows.append(['receipt', receipt['id'], receipt['state'], short(receipt['text'], 2000)])
+    # Length-prefixed fields avoid delimiter ambiguities and agree with Lua's
+    # byte-string lengths. Validate the entire bundle before updating any chat.
+    canonical = b''
+    encoded_rows = []
+    for row in rows:
+        row += [''] * (6 - len(row))
+        for field in row:
+            raw = field.encode('utf-8')
+            canonical += str(len(raw)).encode('ascii') + b':' + raw
+        encoded_rows.append('{' + ','.join(_lua_string(field) for field in row) + '}')
+    if len(canonical) > 600000:
+        raise ValueError('Chat snapshot exceeds transport budget')
+    return '  bundle = {checksum=' + str(zlib.adler32(canonical)) + ',rows={' + ','.join(encoded_rows) + '}},\n'
 
 
 def prepare_slots(addon, count=SLOT_COUNT):

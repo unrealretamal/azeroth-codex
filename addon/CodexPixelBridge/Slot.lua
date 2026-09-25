@@ -64,12 +64,6 @@ local function adler(text)
 end
 local function watch()
     if not initialized then NS.SetStatus('Waiting for addon settings to load.'); return end
-    if not active then
-        local saved = tonumber(CodexPixelBridgeState.nextAddonSlotV1)
-        if saved and saved >= 1 and saved <= SIZE + 1 and saved == math.floor(saved) then
-            slot = math.max(slot, saved); loaded = slot - 1
-        end
-    end
     if slot > SIZE then
         if fallback and fallback('Addon-slot channel reached its session limit.') then return end
         NS.SetStatus('Addon-slot channel reached its session limit. Replies remain in the companion.'); return
@@ -81,7 +75,6 @@ end
 local function advance(wait)
     loaded = slot; slot = slot + 1; deadline = GetTime() + (wait or INTERVAL)
     advertised = false
-    CodexPixelBridgeState.nextAddonSlotV1 = math.max(tonumber(CodexPixelBridgeState.nextAddonSlotV1) or 1, slot)
 end
 local function pause()
     active = false
@@ -91,14 +84,13 @@ fallback = function(reason)
     if type(font.submitted) ~= 'function' or type(font.control) ~= 'function' then return false end
     pause()
     NS.ReturnMode = 'font'
-    body:Hide()
-    if font.body then font.body:Show(); NS.NativeBody = font.body end
-    if font.display then NS.DisplayNativeReply = font.display end
+    -- Keep the shared visible body and its item-link handlers when changing
+    -- transport. Native.lua sends decoded text through NS.DisplayNativeReply.
     NS.IsVisualWatching = font.watching
     NS.PauseVisual = font.pause
     NS.ResumeVisual = font.resume
     NS.OnPromptSubmitted = font.submitted
-    NS.ChangeVisualPage = font.page
+    NS.ChangeVisualPage = function(delta) if delta<0 then body:PageUp() else body:PageDown() end end
     NS.VisualControl = font.control
     if request > 0 then font.submitted(request) end
     NS.SetStatus('Addon slots unavailable; using font fallback. '..tostring(reason))
@@ -115,7 +107,8 @@ NS.OnPromptSubmitted = function(sequence)
     if active or advertised then advance(6) end
     request = sequence; failures = 0; badge:SetText('')
     if NS.ClearReplyLinks then NS.ClearReplyLinks() end
-    body:Clear(); body:AddMessage('Waiting for Codex...'); watch()
+    if not NS.ReceiveChats then body:Clear(); body:AddMessage('Waiting for Codex...') end
+    watch()
 end
 NS.ChangeVisualPage = function(delta) if delta < 0 then body:PageUp() else body:PageDown() end end
 
@@ -130,23 +123,29 @@ NS.VisualControl = function(value)
 end
 
 local function finish(data, reason)
+    local pendingChats
+    if data and data.bundle and NS.ReceiveChats then
+        pendingChats=NS.ReceiveChats(data.bundle)
+        if pendingChats==nil then data=nil;reason='Invalid chat bundle' end
+    end
     advance(INTERVAL)
     if not data then
         failures = failures + 1
         NS.SetStatus('Retrying addon-slot reception: '..tostring(reason))
         if failures >= 3 then
-            if not fallback('Repeated addon-slot errors: '..tostring(reason)) then
+            if NS.ReceiveChats or not fallback('Repeated addon-slot errors: '..tostring(reason)) then
                 pause()
                 NS.SetStatus('Text reception paused after repeated errors: '..tostring(reason))
                 body:AddMessage('The reply remains available in the companion. Resume preview to retry.')
+                if NS.ChatConnection then NS.ChatConnection('Bridge: no reply. Connect to retry.') end
             end
         end
         return
     end
     failures = 0
     local text, state = data.text, data.state
-    NS.DisplayNativeReply(text)
-    if state == 'done' or state == 'failed' or state == 'interrupted' then
+    if pendingChats==nil then NS.DisplayNativeReply(text) end
+    if pendingChats==false or (pendingChats==nil and (state == 'done' or state == 'failed' or state == 'interrupted')) then
         pause(); badge:SetText('!'); badge:SetTextColor(state == 'done' and .35 or 1, state == 'done' and 1 or .5, .55)
         NS.SetStatus(state == 'done' and 'Reply ready. Link idle; Send starts the next request.' or 'Request finished with a problem. Link idle; details below.')
     else
@@ -154,13 +153,23 @@ local function finish(data, reason)
     end
 end
 
+local slotAPI={NS.IsVisualWatching,NS.PauseVisual,NS.ResumeVisual,NS.OnPromptSubmitted,NS.ChangeVisualPage,NS.VisualControl}
+NS.UseSlotReturn=function()
+    if NS.ReturnMode=='slot' then return end
+    if NS.PauseVisual then NS.PauseVisual() end
+    NS.ReturnMode='slot'
+    NS.IsVisualWatching,NS.PauseVisual,NS.ResumeVisual,NS.OnPromptSubmitted,NS.ChangeVisualPage,NS.VisualControl=unpack(slotAPI)
+end
+
 local timer = CreateFrame('Frame', nil, UIParent)
 timer:RegisterEvent('ADDON_LOADED')
 timer:SetScript('OnEvent', function(self, _, name)
     if name ~= ADDON_NAME then return end
     CodexPixelBridgeState = CodexPixelBridgeState or {}
-    slot = tonumber(CodexPixelBridgeState.nextAddonSlotV1) or 1
-    if slot < 1 or slot > SIZE + 1 or slot ~= math.floor(slot) then slot = SIZE + 1 end
+    -- Addon load state resets with the Lua UI. Font counters do not: they use
+    -- a different client resource cache. Leave all persisted font state alone.
+    slot = 1
+    while slot<=SIZE and addonLoaded(slotName(slot)) do slot=slot+1 end
     loaded = slot - 1; initialized = true
 end)
 timer:SetScript('OnUpdate', function()
@@ -172,7 +181,6 @@ timer:SetScript('OnUpdate', function()
         if fallback and fallback('Addon-slot channel reached its session limit.') then return end
         pause(); NS.SetStatus('Addon-slot channel reached its session limit. Replies remain in the companion.'); return
     end
-    CodexPixelBridgeState.nextAddonSlotV1 = math.max(tonumber(CodexPixelBridgeState.nextAddonSlotV1) or 1, slot + 1)
     local name = slotName(slot)
     if addonLoaded(name) then finish(nil, 'Slot already loaded') return end
     CodexPixelBridgeSlotData = nil

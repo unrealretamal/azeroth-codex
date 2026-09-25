@@ -2,7 +2,9 @@
 import argparse
 import copy
 import ctypes
+import gc
 import json
+import os
 import re
 from pathlib import Path
 import queue
@@ -22,6 +24,8 @@ from .native import NativeBridge
 from .slots import SlotBridge
 from .conversation import ConversationContext
 from .calibration import find_strip
+from .scheduler import ChatScheduler
+from .background import InstanceLock, atomic_json, install_startup, request as bridge_request
 
 def save_preferences(state, **changes):
     path = state/'launcher.json'
@@ -41,14 +45,16 @@ class Inbox:
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(jobs)')}
         if 'chat' not in columns:
             self.db.execute('ALTER TABLE jobs ADD COLUMN chat TEXT NOT NULL DEFAULT "default"')
+        if 'operation' not in columns:
+            self.db.execute("ALTER TABLE jobs ADD COLUMN operation TEXT NOT NULL DEFAULT 'send'")
         # A crash may have happened after the agent ran. Never automatically replay it.
         self.db.execute("UPDATE jobs SET state='interrupted' WHERE state IN ('queued','working','streaming')")
         self.db.commit()
 
-    def add(self, key, prompt, chat='default'):
+    def add(self, key, prompt, chat='default', operation='send'):
         with self.db:
-            result = self.db.execute('INSERT OR IGNORE INTO jobs (id,prompt,state,reply,chat) VALUES (?, ?, ?, ?, ?)',
-                                      (key, prompt, 'queued', '', chat))
+            result = self.db.execute('INSERT OR IGNORE INTO jobs (id,prompt,state,reply,chat,operation) VALUES (?, ?, ?, ?, ?, ?)',
+                                      (key, prompt, 'queued', '', chat, operation))
         return result.rowcount == 1
 
     def update(self, key, state, reply=''):
@@ -65,6 +71,18 @@ def unpack_chat(prompt):
     if not match:
         return 'default', prompt
     return match.group(1).lower(), prompt[match.end():]
+
+
+def unpack_request(wire):
+    if wire.startswith('\x1eac2\x1f'):
+        _, chat, operation, text = wire.split('\x1f', 3)
+        if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,31}', chat):
+            raise ValueError('Invalid chat ID')
+        if operation not in ('send', 'sync', 'new', 'folder', 'backend', 'rename', 'reset', 'archive'):
+            raise ValueError('Invalid chat operation')
+        return chat, operation, text
+    chat, text = unpack_chat(wire)
+    return chat, 'send', text
 
 def run_agent(args, prompt, on_update=None, on_session=None, session_id=None):
     if args.backend == 'mock':
@@ -107,11 +125,16 @@ class App:
         self.inbox = Inbox(args.state/'inbox.sqlite3')
         self.chats = ChatStore(args.state/'inbox.sqlite3')
         self.assembler = Assembler()
-        self.jobs, self.events = queue.Queue(maxsize=8), queue.Queue()
+        gc.collect()  # Collect any previously destroyed Tk roots on their owner thread.
+        self.events = queue.Queue()
+        self.jobs = ChatScheduler(self.process_job, getattr(args, 'max_parallel', 3))
         self.active, self.closed = False, False
         self.valid_frames = 0
         self.return_retry_at = 0
         self.strip_visible = None
+        self.next_health = 0
+        self.stop_requested = False
+        self.background = getattr(args, 'background', False)
         self.banner=ReplyBanner(root,self.open_reply)
         root.title('Azeroth Codex — companion replies')
         self.job_status = tk.StringVar(value='Ready for a prompt')
@@ -126,6 +149,8 @@ class App:
         self.chat_button.pack(anchor='w',padx=12,pady=(0,4))
         self.reset_chat_button=tk.Button(root,text='Reset chat Codex session…',command=self.reset_chat_session)
         self.reset_chat_button.pack(anchor='w',padx=12,pady=(0,4))
+        tk.Button(root,text='Enable automatic background startup',command=self.enable_background).pack(anchor='w',padx=12)
+        tk.Button(root,text='Exit bridge',command=self.exit_bridge).pack(anchor='w',padx=12)
         self.project_hint=tk.StringVar()
         tk.Label(root,textvariable=self.project_hint,fg='#a34200').pack(anchor='w',padx=12)
         self.refresh_project_label()
@@ -172,12 +197,13 @@ class App:
             self.show_job_status(state,key)
         self.write('Only the selected strip is captured. Captures are not saved. Prompts/replies are stored locally.\n')
         self.write('Chats persist by /codex chat <name>; Codex threads resume per configured chat.\n')
-        threading.Thread(target=self.worker,daemon=True).start()
         root.protocol('WM_DELETE_WINDOW',self.close)
         if getattr(args, 'start_capture', False):
             self.toggle()
         if getattr(args, 'minimized', False):
             root.after(100, root.iconify)
+        if self.background:
+            root.withdraw()
         root.after(70,self.tick)
 
     def write(self,text):
@@ -194,9 +220,45 @@ class App:
             self.banner.dismiss()
 
     def notify(self,state,reply):
-        if self.notify_enabled.get():
+        if self.notify_enabled.get() and not self.background:
             self.root.bell()
             self.banner.show(state,reply)
+
+    def enable_background(self):
+        try:
+            if not (self.args.state/'capture.json').is_file():
+                raise ValueError('Start capture once to save its crop before enabling automatic startup')
+            install_startup()
+            save_preferences(self.args.state, backend=self.args.backend, sandbox=self.args.sandbox,
+                             project=str(self.args.project), codex=getattr(self.args,'codex','codex'),
+                             addon=str(getattr(self.args,'addon','') or ''), background=True)
+            self.background=True
+            if not self.active: self.toggle()
+            self.root.withdraw()
+        except (OSError,ValueError) as exc:
+            self.write('Automatic startup: '+str(exc))
+
+    def exit_bridge(self):
+        self.stop_requested=True;self.active=False
+        if not self.jobs.unfinished_tasks:
+            self.close(exit_process=True)
+
+    def background_control(self):
+        if time.monotonic()<self.next_health: return
+        self.next_health=time.monotonic()+1
+        path=self.args.state/'bridge-control.json'
+        try:
+            if path.is_file():
+                command=json.loads(path.read_text(encoding='utf-8'));path.unlink(missing_ok=True)
+                if time.time()-command.get('time',0)<30:
+                    if command.get('action')=='show': self.open_reply()
+                    elif command.get('action')=='stop': self.exit_bridge()
+            atomic_json(self.args.state/'bridge-status.json',dict(pid=os.getpid(),time=time.time(),
+                        capture=self.active,pending=self.jobs.unfinished_tasks,background=self.background,
+                        visible=not self.closed and self.root.state()!='withdrawn',
+                        status='stopped' if self.closed else self.status.get()))
+        except (OSError,ValueError,TypeError):
+            pass
 
     def refresh_project_label(self):
         self.project_label.set(f'Default chat folder: {self.args.project}  |  {self.args.sandbox}')
@@ -319,31 +381,34 @@ class App:
         self.region.set(','.join(map(str, region)))
         self.status.set('Found checked strip at ' + ','.join(map(str, region)) + '. Start capture to save it.')
 
-    def worker(self):
-        context=ConversationContext(self.args.state/'inbox.sqlite3')
-        while True:
-            key,prompt,profile=self.jobs.get()
-            self.events.put((key,'working',''))
-            try:
-                settings=copy.copy(self.args)
-                settings.project=Path(profile.project)
-                settings.backend,settings.sandbox=profile.backend,profile.sandbox
-                # A Codex resume contains its own durable conversation. Fallback
-                # history remains for new, mock, or unavailable sessions.
-                agent_prompt=prompt if profile.codex_session and profile.backend=='codex' else context.prompt(key,prompt,profile.id)
-                def save_session(value):
-                    try:
-                        self.chats.set_session(profile.id,value)
-                    except (OSError, sqlite3.Error, ValueError) as exc:
-                        self.record_transport('chat_session_save_failed', chat=profile.id, error=str(exc))
-                state,reply=run_agent(settings,agent_prompt,
-                                      on_update=lambda text:self.events.put((key,'streaming',text)),
-                                      on_session=save_session,session_id=profile.codex_session)
-                if state=='done': context.remember(key,reply)
-            except Exception as exc:
-                state,reply='failed',str(exc)
-            self.events.put((key,state,reply))
-            self.jobs.task_done()
+    def process_job(self, job):
+        key, prompt, chat, operation = job
+        def publish(state, text):
+            # Commit before releasing the chat's scheduling key. Follow-ups see
+            # both the finished turn and the newly saved Codex thread.
+            self.chats.update_job(key, state, text)
+            self.events.put((key, state, text, True))
+        try:
+            publish('working', '')
+            if operation != 'send':
+                reply = self.chats.command(chat, operation, prompt, self.args)
+                state = 'done'
+            else:
+                profile = self.chats.resolve(chat, self.args)
+                settings = copy.copy(self.args)
+                settings.project = Path(profile.project)
+                settings.backend, settings.sandbox = profile.backend, profile.sandbox
+                if not settings.project.is_dir():
+                    raise ValueError('Chat work folder is unavailable')
+                context = ConversationContext(self.args.state/'inbox.sqlite3')
+                agent_prompt = prompt if profile.codex_session and profile.backend == 'codex' else context.prompt(key, prompt, chat, persistent=True)
+                state, reply = run_agent(settings, agent_prompt,
+                    on_update=lambda text: publish('streaming', text),
+                    on_session=lambda value: self.chats.set_session(chat, value),
+                    session_id=profile.codex_session)
+        except Exception as exc:
+            state, reply = 'failed', str(exc)
+        publish(state, reply)
 
     def record_transport(self, event, **details):
         # Bounded metadata only: no screenshots, prompt text or reply text.
@@ -382,9 +447,15 @@ class App:
             else: self.visual=None
 
     def tick(self):
+        self.background_control()
+        if self.closed: return
+        if self.stop_requested and not self.jobs.unfinished_tasks:
+            self.close(exit_process=True);return
         while not self.events.empty():
-            key,state,reply=self.events.get_nowait()
-            self.inbox.update(key,state,reply)
+            event=self.events.get_nowait()
+            key,state,reply=event[:3]
+            if len(event)==3:
+                self.inbox.update(key,state,reply)
             self.show_job_status(state,key)
             self.write(f'[{state}] {key}\n{reply}')
             if state in ('done','failed'):
@@ -397,8 +468,10 @@ class App:
                 if frame[:4] in (b'CPBC',b'CPBN',b'CPBS'):
                     control = parse_control(frame)
                     key = f'{control.session}:{control.request}'
-                    row = self.inbox.db.execute('SELECT id,prompt,state,reply FROM jobs WHERE id=?', (key,)).fetchone()
-                    snapshot = dict(zip(('id','prompt','state','reply'), row)) if row else {'id':key,'state':'waiting'}
+                    row = self.inbox.db.execute('SELECT id,prompt,state,reply,chat FROM jobs WHERE id=?', (key,)).fetchone()
+                    snapshot = dict(zip(('id','prompt','state','reply','chat'), row)) if row else {'id':key,'state':'waiting'}
+                    if control.kind == 'slot':
+                        snapshot['chats'], snapshot['receipts'] = self.chats.snapshot(control.session)
                     self.publish_reply(control,snapshot)
                     result = None
                 else:
@@ -407,29 +480,34 @@ class App:
                 self.status.set(f'Receiving strip ({self.valid_frames} frames). Repeated messages are ignored.')
                 if result and not self.jobs.full():
                     key,prompt=result
-                    chat,prompt = unpack_chat(prompt)
-                    if self.inbox.add(key,prompt,chat):
+                    chat,operation,prompt = unpack_request(prompt)
+                    if self.inbox.add(key,prompt,chat,operation):
                         self.write(f'[queued] {key}  chat={chat}\nYou: {prompt}')
                         if not self.jobs.unfinished_tasks:
                             self.show_job_status('queued',key)
-                        self.jobs.put_nowait((key,prompt,self.chats.resolve(chat,self.args)))
+                        self.jobs.put_nowait((key,prompt,chat,operation))
             except (ValueError,UnicodeError):
                 if self.strip_visible is not False:
                     self.record_transport('strip_unreadable');self.strip_visible=False
                 self.status.set('Waiting for valid strip: check crop, visibility and display scaling')
             except OSError as exc:
-                self.active=False; self.status.set('Capture stopped: '+str(exc))
+                if not self.background: self.active=False
+                self.status.set('Capture unavailable; retrying' if self.background else 'Capture stopped: '+str(exc))
         self.project_button.configure(state='disabled' if self.jobs.unfinished_tasks else 'normal')
         self.chat_button.configure(state='disabled' if self.jobs.unfinished_tasks else 'normal')
         self.reset_chat_button.configure(state='disabled' if self.jobs.unfinished_tasks else 'normal')
         if not self.closed: self.root.after(70,self.tick)
 
-    def close(self):
+    def close(self, exit_process=False):
+        if self.background and not exit_process:
+            self.root.withdraw();return
         if self.jobs.unfinished_tasks:
             self.active=False
             self.status.set('Capture paused. Wait for queued/running jobs before closing.')
             return
-        self.closed=True; self.banner.dismiss(); self.inbox.db.close(); self.root.destroy()
+        self.closed=True; self.jobs.shutdown(); self.jobs.run=None
+        self.banner.dismiss(); self.inbox.db.close(); self.root.destroy()
+        gc.collect()
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -439,11 +517,31 @@ def main():
     parser.add_argument('--state',type=Path,default=Path('state'))
     parser.add_argument('--sandbox',choices=['read-only','workspace-write'],default='read-only')
     parser.add_argument('--timeout',type=int,default=600)
+    parser.add_argument('--max-parallel',type=int,default=3,choices=range(1,9))
     parser.add_argument('--region',type=int,nargs=4,metavar=('X','Y','W','H'))
     parser.add_argument('--start-capture',action='store_true')
     parser.add_argument('--minimized',action='store_true')
+    parser.add_argument('--background',action='store_true')
+    parser.add_argument('--saved-config',action='store_true')
     parser.add_argument('--addon',type=Path,help='Installed CodexPixelBridge directory with its prepared image bank')
     args=parser.parse_args()
+    if args.saved_config:
+        settings=json.loads((args.state/'launcher.json').read_text(encoding='utf-8'))
+        args.backend=settings.get('backend','codex')
+        for key in ('project','addon','backend','sandbox','codex','max_parallel'):
+            if key in settings:
+                setattr(args,key,Path(settings[key]) if key in ('project','addon') else settings[key])
+        from .launching import find_codex
+        if args.backend=='codex':
+            args.codex=find_codex(args.codex)
+            if not args.codex: parser.error('Codex executable unavailable; open bridge configuration')
+    if args.addon is None:
+        try:
+            addon=json.loads((args.state/'launcher.json').read_text(encoding='utf-8')).get('addon')
+            if addon: args.addon=Path(addon)
+        except (OSError,ValueError): pass
+    if args.backend not in ('mock','codex') or args.sandbox not in ('read-only','workspace-write'):
+        parser.error('Invalid backend or sandbox in saved configuration')
     if args.region is None:
         try:
             region=json.loads((args.state/'capture.json').read_text(encoding='utf-8'))['region']
@@ -458,6 +556,17 @@ def main():
     if hasattr(ctypes,'windll'):
         try: ctypes.windll.shcore.SetProcessDpiAwareness(2)
         except OSError: pass
-    App(tk.Tk(),args).root.mainloop()
+    identities=[args.state]
+    if args.addon: identities.append(args.addon)
+    lock=InstanceLock(*identities)
+    if not lock.acquire():
+        if not args.background: bridge_request(args.state,'show')
+        return
+    try:
+        root=tk.Tk()
+        if args.background: root.withdraw()
+        App(root,args).root.mainloop()
+    finally:
+        lock.close()
 
 if __name__=='__main__': main()

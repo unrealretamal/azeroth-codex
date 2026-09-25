@@ -10,6 +10,12 @@ BASE = Path(__file__).resolve().parent
 STATE = BASE / 'state'
 
 def launch():
+    # Normal launches reuse/start the hidden bridge. Explicit configuration
+    # opens diagnostics without starting another inbox consumer.
+    if '--configure' not in sys.argv and (STATE/'launcher.json').is_file() and (STATE/'capture.json').is_file():
+        from companion.background import start
+        start(STATE)
+        return
     root = tk.Tk()
     root.withdraw()
     settings = STATE / 'launcher.json'
@@ -32,7 +38,7 @@ def launch():
     launch_options = [arg for arg in sys.argv[1:] if arg in ('--start-capture', '--minimized')]
     if config.get('start_capture') and '--start-capture' not in launch_options:
         launch_options.append('--start-capture')
-    sys.argv = [__file__, '--backend', 'codex', '--project', project, '--codex', codex, '--state', str(STATE)] + launch_options
+    sys.argv = [__file__, '--saved-config', '--state', str(STATE)] + launch_options
     main()
 
 if __name__ == '__main__':
