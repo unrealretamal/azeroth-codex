@@ -6,11 +6,11 @@ import time
 import unittest
 from unittest.mock import patch
 
-from companion.agent_stream import run_stream
+from companion.agent_stream import command_for, run_stream
 
 
 class AgentStreamTests(unittest.TestCase):
-    def invoke(self, script, *, timeout=4, prompt='test café; $(literal)', callback=None):
+    def invoke(self, script, *, timeout=4, prompt='test café; $(literal)', callback=None, session_callback=None):
         args = argparse.Namespace(codex='codex', sandbox='read-only', project=Path.cwd(), timeout=timeout)
         real_popen = subprocess.Popen
 
@@ -21,7 +21,7 @@ class AgentStreamTests(unittest.TestCase):
             return real_popen([sys.executable, '-u', '-c', script], **kwargs)
 
         with patch('companion.agent_stream.subprocess.Popen', side_effect=fixture):
-            return run_stream(args, prompt, callback or (lambda _: None))
+            return run_stream(args, prompt, callback or (lambda _: None), session_callback)
 
     def test_real_process_updates_before_completion_and_replaces_item(self):
         updates = []
@@ -60,6 +60,24 @@ for kind,text in [('item.updated','partial'),('item.completed','complete')]:
 print(json.dumps({'type':'turn.completed'}),flush=True)
 '''
         self.assertEqual(self.invoke(script), ('done', 'complete'))
+
+    def test_new_thread_is_reported_and_resume_uses_session_argv(self):
+        started = []
+        script = '''
+import json,sys
+sys.stdin.read()
+print(json.dumps({'type':'thread.started','thread_id':'12345678-aaaa-bbbb-cccc-123456789abc'}),flush=True)
+print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'done'}}),flush=True)
+print(json.dumps({'type':'turn.completed'}),flush=True)
+'''
+        self.assertEqual(self.invoke(script, callback=lambda _: None, session_callback=started.append), ('done', 'done'))
+        self.assertEqual(started, ['12345678-aaaa-bbbb-cccc-123456789abc'])
+        args = argparse.Namespace(codex='codex', sandbox='read-only', project=Path.cwd(), timeout=4)
+        command = command_for(args, '12345678-aaaa-bbbb-cccc-123456789abc')
+        self.assertEqual(command, ['codex', 'exec', 'resume', '--json', '--skip-git-repo-check',
+                                   '12345678-aaaa-bbbb-cccc-123456789abc', '-'])
+        with self.assertRaises(ValueError):
+            command_for(args, '../bad')
 
 
 if __name__ == '__main__':

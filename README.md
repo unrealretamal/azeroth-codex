@@ -1,14 +1,14 @@
 <p align="center">
-<img src="docs/cover.svg" alt="Azeroth Codex: WoW pixel strip, local Codex queue, and font metrics return path" width="100%">
+  <img src="docs/cover.svg" alt="Azeroth Codex: WoW pixel strip, local Codex queue, and checked reply transport" width="100%">
 </p>
 
 <h1 align="center">Azeroth Codex</h1>
 
 <p align="center"><strong>Native, bounded chat between WoW: Forever and a local Codex process.</strong></p>
 
-<p align="center">Version 0.4.7 · Experimental transport · Windows + NTFS · Python 3.12+</p>
+<p align="center">Version 0.5.0 · Experimental transport · Windows + NTFS · Python 3.12+</p>
 
-Prompts leave the game through a small on-screen pixel strip. Replies return as checked UTF-8 bytes encoded in ordinary addon font metrics, then render as normal scrollable text. The bridge uses documented addon APIs only: no injection, process-memory access, simulated input, or executable response payloads.
+Prompts leave the game through a small on-screen pixel strip. Replies normally return through checked data in pre-created load-on-demand addon slots; font metrics remain an alternative fallback. The bridge uses documented addon APIs only: no injection, process-memory access, simulated input, or executable response payloads.
 
 > **Status:** verified in the tested Forever client. Finite first-use font slots and runtime behavior on other builds remain experimental.
 
@@ -30,7 +30,8 @@ Prompts leave the game through a small on-screen pixel strip. Replies return as 
 | Direction | Carrier | Receiver |
 | --- | --- | --- |
 | WoW to companion | 128 x 4 pixel strip | Screen capture + checked packet decoder |
-| Companion to WoW | First-use TrueType font metrics | Documented `SetFont`, `SetText`, and `GetStringWidth` |
+| Companion to WoW (default) | First-use load-on-demand addon slot | Documented `LoadAddOn` reads checked data |
+| Companion to WoW (fallback) | First-use TrueType font metrics | Documented `SetFont`, `SetText`, and `GetStringWidth` |
 
 Once installed and loaded, ordinary messages need no `/reload`.
 
@@ -40,39 +41,40 @@ This is an experimental, finite transport built around documented addon APIs. It
 
 - Native chat/status frame with `/codex`, hide/show, minimap toggle and completion badge.
 - Shift-click or drag items into a focused draft. Item references in responses can become native links with tooltips.
-- Checked UTF-8 replies, multipart assembly, stale-packet rejection and automatic retry after missed writes.
+- Checked UTF-8 replies through 200 first-use load-on-demand addon slots; retained font fallback and image prototype.
 - A **65,535-slot** font bank with compact shared placeholders and isolated writes.
-- A Windows companion with capture controls, persistent inbox, reply notifications and a local Codex adapter. The default agent sandbox is read-only.
+- A Windows companion with capture controls, auto-calibration, persistent chats/Codex threads, reply notifications and a local Codex adapter. The default agent sandbox is read-only.
 
 ## How the two-way channel works
 
-The bridge combines two different paths. **WoW sends data by drawing pixels that the companion can capture. The companion sends data back by preparing an unused font that WoW can load and measure.** After decoding, the reply is an ordinary Lua string displayed with the game's normal text UI.
+The bridge combines two different paths. **WoW sends data by drawing pixels that the companion captures. The companion normally writes checked data to a pre-created unused addon slot, which WoW loads through `LoadAddOn`.** The font path remains available as a fallback. After validation, the reply is an ordinary Lua string displayed with the game's normal text UI.
 
 | Direction | Carrier | What the receiver reads |
 | --- | --- | --- |
 | WoW → companion | A small black-and-white pixel strip | Bits sampled from a screen capture |
-| Companion → WoW | An existing, previously unused addon font file | Numbers returned by font-width measurements |
+| Companion → WoW | An existing, previously unused addon slot | Checked Lua data table at addon load |
+| Companion → WoW fallback | An existing, previously unused addon font file | Numbers returned by font-width measurements |
 
 ```mermaid
 flowchart LR
     subgraph Game[WoW addon]
         Draft[Prompt and item links]
         Strip[Pixel strip]
-        Measure[Measure font glyph widths]
+        Load[Load checked reply slot]
         Text[Checked reply as native text]
         Draft --> Strip
-        Measure --> Text
+        Load --> Text
     end
     subgraph Desktop[Local companion]
         Decode[Decode pixels and validate packets]
         Inbox[Deduplicate and queue prompt]
         Agent[Local Codex process]
-        Writer[Encode reply bytes into a font]
+        Writer[Write checked slot data]
         Decode --> Inbox --> Agent --> Writer
     end
     Strip -->|Screen capture| Decode
-    Writer -->|Replace one unused addon font file| Measure
-    Measure -->|Next slot and fragment request| Strip
+    Writer -->|Replace Inbox.lua before first load| Load
+    Load -->|Next slot/status request| Strip
 ```
 
 ### 1. WoW sends the prompt through pixels
@@ -87,7 +89,13 @@ The addon updates the strip on a roughly 250 ms cadence. While receiving a reply
 
 The durable inbox uses the session/request pair as its key. Repeated optical packets therefore do not repeatedly launch Codex. Accepted prompts enter the local worker queue; the adapter starts `codex exec --json` with the prompt on standard input. It collects actual assistant-message events and completion state. Recent completed exchanges from the same UI session provide bounded conversation context for follow-up requests.
 
-### 2. The strip also schedules the return path
+### 2. The strip schedules checked addon-slot replies
+
+The default control packet is **CPBS v3**. It carries session/request identity, the next slot, deadline, active state and last loaded slot. The companion writes data-only `Inbox.lua` into that pre-created slot before its deadline. The game loads each slot only once per UI session and validates version, session, request, slot, status, UTF-8 byte cap and Adler-32 revision before rendering. Slot contents never execute as commands.
+
+The installer creates `CodexPixelBridgeSlot001` through `CodexPixelBridgeSlot200` beside the main addon. WoW discovers addon folders at client launch, so first installing this transport requires a full game restart. A `/reload` makes their first-use capacity available again after installation. A slot is never reused for a different request within one UI session; replies remain in the companion after 200 attempts.
+
+### 3. Font fallback scheduling
 
 The second kind of optical packet, **CPBN**, tells the companion:
 
@@ -103,7 +111,7 @@ The first normal write window is six seconds; subsequent windows are normally fi
 
 Each slot's packet is frozen for that attempt. A newer agent response waits for a later slot instead of changing a file the game may already be loading. **Writing a file is not proof of delivery.** The `loaded` counter means “last attempted slot,” including failed attempts; requested fragment numbers and the active/idle state communicate the receiver's progress.
 
-### 3. The companion encodes reply bytes as font widths
+### 4. The companion encodes fallback reply bytes as font widths
 
 The installation creates a bank of known addon font filenames before the game discovers its resources. The companion publishes a response by writing a complete temporary TrueType font and atomically replacing one **previously unused** bank file.
 
@@ -133,7 +141,7 @@ On the WoW side, an invisible FontString uses documented `SetFont`, `SetText` an
 
 **The addon never reads the font file as raw bytes.** The game loads a normal font resource; Lua reads its measurable properties. The generated font contains ordinary outlines and metrics, with no TrueType instruction bytecode. The recovered bytes are checked data, never executable Lua or game commands.
 
-### 4. Checked packets become normal in-game text
+### 5. Checked packets become normal in-game text
 
 A native reply packet is **512 bytes**: a 32-byte header, a 476-byte payload area and a four-byte checksum. Its header includes the state, payload length, session, request, slot, content revision and fragment number/count. The receiver checks those fields, padding and checksum before accepting a fragment.
 
@@ -151,7 +159,7 @@ The revision is a checksum of the complete preview text and state. If a new revi
 
 The final string goes into a normal scrolling text frame. Raw WoW markup is escaped. Supported item references are validated against game-provided metadata and converted into native item links. No response screenshot is being painted into the chat panel, and no OCR is needed to recover text.
 
-### 5. Completion, retries and the flashing strip
+### 6. Completion, retries and the flashing strip
 
 The packet state distinguishes waiting, queued, working, streaming, done, failed and interrupted. The addon raises its completion badge only after decoding a complete final-state reply. It then pauses reception and emits a steady inactive control frame; the next Send resumes the channel. The companion's desktop notification is separate and can occur earlier, when the agent finishes locally.
 
@@ -159,7 +167,7 @@ The strip therefore flashes during both prompt transmission and reply transfer. 
 
 If no writer reaches a slot before its first load, the addon reads a recognizable zero-filled baseline packet. It keeps existing reply fragments, advances to another slot and retries with delays of 10, 20, then at most 30 seconds. Three consecutive real loading/corruption errors pause reception. Each watch also has a 20-minute limit. Replies remain in the companion if in-game delivery fails or the watch expires.
 
-### 6. Why there are 65,535 files
+### 7. Why there are 65,535 fallback font files
 
 The successful live behavior depends on **first use of an existing filename in the current game process**. In the tested client, rewriting a font path after it had been loaded continued to return cached data. New filenames created after UI load were not discovered by the tested routes. Precreating many names lets the bridge move forward through unused resources without a per-message reload.
 
@@ -180,15 +188,17 @@ A one-time reload is needed for changed addon code and resource discovery after 
 | Draw the strip, assign request IDs and handle Send | [Main.lua](addon/CodexPixelBridge/Main.lua) |
 | Encode/decode prompt packets and sample captured pixels | [Protocol.lua](addon/CodexPixelBridge/Protocol.lua), [protocol.py](companion/protocol.py) |
 | Validate optical control packets | [visual.py](companion/visual.py) (`parse_control`; this module also retains the earlier image prototype) |
+| Write and freeze addon-slot data | [slots.py](companion/slots.py) |
 | Capture the strip, deduplicate requests and publish replies | [app.py](companion/app.py) |
 | Run the agent and collect real response events | [agent_stream.py](companion/agent_stream.py) |
 | Include recent conversation history | [conversation.py](companion/conversation.py) |
 | Build response packets/fonts and publish them atomically | [native.py](companion/native.py) |
-| Measure fonts, schedule slots and update the in-game frame | [Native.lua](addon/CodexPixelBridge/Native.lua) |
+| Load checked reply slots and update the in-game frame | [Slot.lua](addon/CodexPixelBridge/Slot.lua) |
+| Measure fallback fonts, schedule slots and update the in-game frame | [Native.lua](addon/CodexPixelBridge/Native.lua) |
 | Validate and assemble decoded reply fragments | [NativeProtocol.lua](addon/CodexPixelBridge/NativeProtocol.lua) |
 | Generate compact banks and fixed probe assets | [install_addon.py](tools/install_addon.py) |
 
-The earlier image-response implementation remains in the repository for diagnostic history. The current addon manifests load the native font-byte receiver for normal replies. [Architecture reference](docs/architecture.md) · [Font-bank storage](docs/font-bank.md) · [Observed behavior and tests](docs/testing.md).
+The earlier image-response implementation remains in the repository for diagnostic history. The current addon manifests load the addon-slot receiver first and retain the native font-byte receiver as fallback. [Architecture reference](docs/architecture.md) · [Font-bank storage](docs/font-bank.md) · [Observed behavior and tests](docs/testing.md).
 
 ## Requirements
 
@@ -210,9 +220,9 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m tools.install_addon 'C:\path\to\World of Warcraft\_classic_beta_\Interface\AddOns\CodexPixelBridge'
 ```
 
-Use your actual game path. The installer copies addon code, generates the font/image resources and preserves existing resource files. **Do not just copy the addon source folder:** generated assets are intentionally excluded from Git and source archives. Fonts can contain response data and ordinary copies also lose their compact shared storage.
+Use your actual game path. The installer copies addon code, generates missing sibling reply-slot addons plus font/image resources, and preserves existing resource files. **Do not just copy the addon source folder:** generated assets are intentionally excluded from Git and source archives. Fonts can contain response data and ordinary copies also lose their compact shared storage.
 
-Enable the addon and load WoW. If updating while playing, manually `/reload` once to load new Lua and asset names. Fully restart WoW if new assets remain undiscovered. The title should say **Codex | Live text 0.4.7**. Never reset or replace a used font bank while the game is running.
+Enable the main addon and all `CodexPixelBridgeSlot*` addons, then restart WoW once after first slot installation so it discovers their folders. Later Lua updates need `/reload`. The title should say **Azeroth Codex | Checked reply slots**. Never reset or replace a used font bank while the game is running.
 
 ## Run the companion
 
@@ -220,7 +230,7 @@ Enable the addon and load WoW. If updating while playing, manually `/reload` onc
 .\.venv\Scripts\python.exe -m companion.app --backend codex --project 'C:\path\to\work-project' --codex 'C:\path\to\codex.exe' --addon 'C:\path\to\World of Warcraft\_classic_beta_\Interface\AddOns\CodexPixelBridge'
 ```
 
-Use an existing work directory, separate from the game installation. In the companion, set the capture crop to the strip's exact desktop coordinates: left, top, width, height. The nominal strip is 512 by 16 at (8, 8), but display scaling changes those values. Start capture, open `/codex` and send a short message. Capture calibration is saved locally.
+Use an existing work directory, separate from the game installation. In the companion, use **Auto-detect strip** or set exact desktop coordinates: left, top, width, height. The nominal strip is 512 by 16 at (8, 8), but display scaling changes those values. Start capture, open `/codex` and send a short message. Capture calibration is saved locally.
 
 To test without calling an agent, replace `--backend codex` with `--backend mock` and omit `--codex`. The adapter normally runs `codex exec --json --sandbox read-only`; `--sandbox workspace-write` is an explicit opt-in to project edits. No bypass mode is provided.
 
@@ -233,8 +243,10 @@ To test without calling an agent, replace `--backend codex` with `--backend mock
 | Show/hide the panel | `/codex`, `/cpb`, minimap C button, or addon keybinding |
 | Explicit visibility | `/codex show`, `/codex hide` |
 | Send a prompt | Enter or Send in the message box |
+| Select persistent chat | `/codex chat <name>`; `/codex chat` shows active name |
 | Link an item | Focus the message box and Shift-click an item, or drag it into the box |
 | Pause/resume receiving | `/codex pause`, `/codex resume`, or panel buttons |
+| Use font fallback | `/codex font` (also automatic after slot exhaustion/repeated slot errors) |
 | Clear repeating prompts | `/codex clear` (already received agent jobs continue) |
 | Read a response item link | Hover/click; Shift-click inserts it into a draft without sending |
 
@@ -246,9 +258,9 @@ The font bank is finite and does not automatically recycle. Each font carries a 
 
 The preview limit is 60,000 UTF-8 bytes. The companion retains the full response. Each receive watch stops after 20 minutes, three consecutive real loading/corruption failures, or a completed response. Lost saved counters can require reading past cached old slots. Keep the strip visible while receiving.
 
-The native channel has delivered real responses and completion notifications in the tested client. Shared placeholders delivered fresh bytes in two live experiments, and diagnostic font filenames were successfully reused after a full client restart. Full-bank recycling, startup performance and live use of slot 65,535 remain unverified. Native item-link mouse behavior and the split-stack fix still need broader live verification.
+The addon-slot path is source-tested but has not been deployed to the existing game installation. The font channel has delivered real responses and completion notifications in the tested client. Shared placeholders delivered fresh bytes in two live experiments, and diagnostic font filenames were successfully reused after a full client restart. Full-bank recycling, startup performance and live use of slot 65,535 remain unverified. Native item-link mouse behavior and the split-stack fix still need broader live verification.
 
-**87 local tests pass**, including production Lua 5.1, real font measurements, consecutive multipart replies, the last slot, replacement-prompt slot retirement and a clean-source installer. [Testing](docs/testing.md).
+Automated tests include production Lua 5.1, real font measurements, slot lifecycle, persistent chat profiles, replacement-prompt slot retirement and a clean-source installer. [Testing](docs/testing.md).
 
 ## Local data
 

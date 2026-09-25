@@ -4,9 +4,10 @@ import random
 import subprocess
 import tempfile
 import unittest
+import zlib
 from unittest.mock import patch
 from companion.protocol import encode, parse, render, decode_image, Assembler
-from companion.app import Inbox, run_agent
+from companion.app import Inbox, run_agent, unpack_chat
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -84,6 +85,10 @@ class ProtocolTests(unittest.TestCase):
         with patch('subprocess.run',side_effect=fixture):
             self.assertEqual(run_agent(args,'test café'),('done','test café'))
 
+    def test_addon_chat_metadata_is_removed_before_agent_input(self):
+        self.assertEqual(unpack_chat('\x1echat=raids\x1fwhere next?'), ('raids', 'where next?'))
+        self.assertEqual(unpack_chat('ordinary text'), ('default', 'ordinary text'))
+
 class LuaTests(unittest.TestCase):
     def setUp(self):
         try:
@@ -133,7 +138,7 @@ class LuaTests(unittest.TestCase):
         ''')
         bits=self.lua.globals()[b'bits']
         frame=bytes(sum(int(bits[i+j+1]) << (7-j) for j in range(8)) for i in range(0,512,8))
-        self.assertEqual(Assembler().accept(frame)[1],'hello from Lua')
+        self.assertEqual(unpack_chat(Assembler().accept(frame)[1]), ('default', 'hello from Lua'))
         self.lua.execute(b'''
         SlashCmdList.CODEXPIXELBRIDGE('hide')
         assert(not CodexPixelBridgePanel:IsShown())
@@ -183,10 +188,67 @@ class LuaTests(unittest.TestCase):
         self.assertEqual(control.request, 2)
         assembler = Assembler()
         prompts = [assembler.accept(f) for f in frames if f[:4]==b'CPB1']
-        self.assertIn('second prompt', [p[1] for p in prompts if p])
+        self.assertIn('second prompt', [unpack_chat(p[1])[1] for p in prompts if p])
         self.lua.execute(b"SlashCmdList.CODEXPIXELBRIDGE('clear')")
         cleared = pulse()
         self.assertFalse(parse_control(cleared).active)
         self.assertEqual(cleared, pulse())
+
+    def test_load_on_demand_slot_control_and_checked_reply(self):
+        from companion.visual import parse_control
+        self.test_addon_load_and_submit_with_ui_stubs()
+        self.lua.execute((ROOT/'addon/CodexPixelBridge/Slot.lua').read_bytes(), b'CodexPixelBridge', self.ns)
+        revision = str(zlib.adler32(b'done\0slot reply')).encode()
+        self.lua.execute(b'''
+        CodexPixelBridgeState={}
+        for _,w in ipairs(widgets) do
+          if w.scripts.OnEvent then w.scripts.OnEvent(w,'ADDON_LOADED','CodexPixelBridge') end
+        end
+        now=200; function GetTime() return now end
+        C_AddOns={
+          IsAddOnLoaded=function() return false end,
+          LoadAddOn=function(name)
+            CodexPixelBridgeSlotData={version=1,session='3132333435363738',request=1,
+              slot=1,state='done',revision=''' + revision + b''',text='slot reply'}
+            return true
+          end,
+        }
+        ''')
+        self.ns[b'OnPromptSubmitted'](1)
+        control = self.ns[b'VisualControl'](b'12345678')
+        parsed = parse_control(control)
+        self.assertEqual((parsed.kind, parsed.slot, parsed.request, parsed.loaded), ('slot', 1, 1, 0))
+        self.lua.execute(b'''
+        now=207
+        for _,w in ipairs(widgets) do if w.scripts.OnUpdate then w.scripts.OnUpdate(w,0.3) end end
+        ''')
+        self.assertEqual(self.ns[b'LastNativeReply'], b'slot reply')
+        self.assertFalse(self.ns[b'IsVisualWatching']())
+
+    def test_slot_transport_can_restore_retained_font_fallback(self):
+        self.test_addon_load_and_submit_with_ui_stubs()
+        self.lua.globals()[b'NS'] = self.ns
+        self.lua.execute(b'''
+        NS.NativeBody=CreateFrame('ScrollingMessageFrame')
+        NS.DisplayNativeReply=function(text) font_reply=text end
+        NS.IsVisualWatching=function() return false end
+        NS.PauseVisual=function() font_paused=true end
+        NS.ResumeVisual=function() font_resumed=true end
+        NS.OnPromptSubmitted=function(sequence) font_request=sequence end
+        NS.ChangeVisualPage=function() end
+        NS.VisualControl=function() return 'FONT' end
+        CodexPixelBridgeState={}
+        ''')
+        self.lua.execute((ROOT/'addon/CodexPixelBridge/Slot.lua').read_bytes(), b'CodexPixelBridge', self.ns)
+        self.lua.execute(b'''
+        for _,w in ipairs(widgets) do
+          if w.scripts.OnEvent then w.scripts.OnEvent(w,'ADDON_LOADED','CodexPixelBridge') end
+        end
+        ''')
+        self.ns[b'OnPromptSubmitted'](7)
+        self.assertTrue(self.ns[b'UseFontReturn'](b'manual test'))
+        self.assertEqual(self.ns[b'ReturnMode'], b'font')
+        self.assertEqual(self.lua.globals()[b'font_request'], 7)
+        self.assertEqual(self.ns[b'VisualControl'](b'12345678'), b'FONT')
 
 if __name__=='__main__': unittest.main()

@@ -126,6 +126,7 @@ timer:SetScript('OnEvent',function(self,event,name)
     loaded=slot-1;initialized=true
 end)
 timer:SetScript('OnUpdate',function()
+    if NS.ReturnMode=='slot' then return end
     if not initialized or not active or not session then return end
     local now=GetTime()
     if now>=watchUntil then NS.PauseVisual();NS.SetStatus('Text checks paused after 20 minutes. Resume to check again.');return end
@@ -160,9 +161,13 @@ timer:SetScript('OnUpdate',function()
         local i=reading.index
         local code=0xE000+i
         local char=string.char(224+math.floor(code/4096),128+math.floor(code/64)%64,128+code%64)
-        local value=(width(char)-reading.low)*255/reading.range
+        local measured=width(char)
+        local value=(measured-reading.low)*255/reading.range
         local rounded=math.floor(value+.5)
-        if rounded<0 or rounded>255 or math.abs(value-rounded)>.20 then finish('Font byte measurement');return end
+        if rounded<0 or rounded>255 or math.abs(value-rounded)>.20 then
+            finish(string.format('Font byte measurement: slot=%d byte=%d width=%.4f low=%.4f high=%.4f value=%.4f',
+                slot,i,measured,reading.low,reading.low+reading.range,value));return
+        end
         reading.bytes[#reading.bytes+1]=string.char(rounded);reading.index=i+1
         if reading.index==512 then
             local packet,reason=NS.ParseNativePacket(table.concat(reading.bytes),session,request,slot)

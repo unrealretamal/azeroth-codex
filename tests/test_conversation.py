@@ -19,8 +19,8 @@ class ConversationTests(unittest.TestCase):
         self.inbox.db.close()
         self.temp.cleanup()
 
-    def add(self, key, prompt, state='done', reply='answer'):
-        self.inbox.add(key, prompt)
+    def add(self, key, prompt, state='done', reply='answer', chat='default'):
+        self.inbox.add(key, prompt, chat)
         self.inbox.update(key, state, reply)
 
     def decoded(self, key, prompt='follow up'):
@@ -65,3 +65,11 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(data['latest_user_message'],latest)
         self.assertEqual(data['history'][-2]['content'],'question 11')
         self.assertIn('shortened',data['history'][-1]['content'])
+
+    def test_history_is_scoped_to_the_selected_persistent_chat(self):
+        self.add(self.session+'1', 'mage chat', reply='arcane answer', chat='mage')
+        self.add(self.session+'2', 'warrior chat', reply='arms answer', chat='warrior')
+        self.add(self.session+'3', 'mage followup', 'queued', '', chat='mage')
+        data=json.loads(self.context.prompt(self.session+'3', 'mage followup', 'mage').split('\n\n', 1)[1])
+        self.assertEqual(data['history'], [{'role':'user','content':'mage chat'},
+                                           {'role':'assistant','content':'arcane answer'}])

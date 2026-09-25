@@ -4,11 +4,24 @@ import queue
 import subprocess
 import threading
 import time
+import re
+
+SESSION_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$')
 
 
-def run_stream(args, prompt, on_update):
-    command = [args.codex, 'exec', '--json', '--sandbox', args.sandbox,
-               '--skip-git-repo-check', '--color', 'never', '-C', str(args.project), '-']
+def command_for(args, session_id=None):
+    """Build an argv list. Prompt stays on stdin, never in command arguments."""
+    if session_id:
+        if not isinstance(session_id, str) or not SESSION_ID.fullmatch(session_id):
+            raise ValueError('Invalid Codex session ID')
+        # Resumed threads retain their original project and sandbox settings.
+        return [args.codex, 'exec', 'resume', '--json', '--skip-git-repo-check', session_id, '-']
+    return [args.codex, 'exec', '--json', '--sandbox', args.sandbox,
+            '--skip-git-repo-check', '--color', 'never', '-C', str(args.project), '-']
+
+
+def run_stream(args, prompt, on_update, on_session=None, session_id=None):
+    command = command_for(args, session_id)
     try:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True, encoding='utf-8',
@@ -75,6 +88,10 @@ def run_stream(args, prompt, on_update):
                 completed = True
             elif kind in ('error', 'turn.failed'):
                 failures.append(str(event.get('message') or event.get('error') or event))
+            elif kind in ('thread.started', 'session.started') and on_session:
+                thread = event.get('thread_id') or event.get('session_id')
+                if isinstance(thread, str) and SESSION_ID.fullmatch(thread):
+                    on_session(thread)
             item = event.get('item')
             if kind in ('item.started', 'item.updated', 'item.completed') and isinstance(item, dict) and item.get('type') == 'agent_message':
                 # CLI versions may publish only complete messages, or also updates.

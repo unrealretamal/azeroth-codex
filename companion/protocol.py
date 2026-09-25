@@ -49,7 +49,7 @@ def read_image_frame(image):
 def decode_image(image):
     """Image must be an exact, axis-aligned crop of the 128 x 4 cell strip."""
     frame = read_image_frame(image)
-    if frame[:4] in (b'CPBC', b'CPBN'):
+    if frame[:4] in (b'CPBC', b'CPBN', b'CPBS'):
         from .visual import parse_control
         parse_control(frame)
     else:

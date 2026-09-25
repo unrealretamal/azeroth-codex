@@ -115,3 +115,16 @@ class CompanionUITests(unittest.TestCase):
         self.assertEqual(self.app.jobs.unfinished_tasks,0)
         self.assertEqual(self.app.inbox.db.execute('SELECT count(*) FROM jobs').fetchone()[0],0)
         self.app.toggle()
+
+    def test_slot_control_routes_to_addon_slot_writer_without_submitting_job(self):
+        self.app.slots = Mock()
+        self.app.native = Mock()
+        self.app.visual = Mock()
+        self.app.toggle()
+        with patch('companion.app.ImageGrab.grab', return_value=render(encode_control(kind='slot'))):
+            self.app.tick()
+        self.app.slots.accept.assert_called_once()
+        self.app.native.accept.assert_not_called()
+        self.app.visual.accept.assert_not_called()
+        self.assertEqual(self.app.jobs.unfinished_tasks, 0)
+        self.app.toggle()

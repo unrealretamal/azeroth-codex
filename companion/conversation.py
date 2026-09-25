@@ -31,15 +31,16 @@ class ConversationContext:
         while len(self.completed) > 8:
             self.completed.popitem(last=False)
 
-    def prompt(self, key, current):
+    def prompt(self, key, current, chat='default'):
         if not re.fullmatch(r'[0-9a-f]{16}:[1-9][0-9]*', key):
             return current
         session = key.split(':')[0]
-        with closing(sqlite3.connect(self.database)) as db:
+        with closing(sqlite3.connect(self.database, timeout=5)) as db:
+            db.execute('PRAGMA busy_timeout=5000')
             rows = db.execute(
-                'SELECT id,prompt,state,reply FROM jobs WHERE id LIKE ? '
+                'SELECT id,prompt,state,reply FROM jobs WHERE id LIKE ? AND chat=? '
                 'AND rowid < (SELECT rowid FROM jobs WHERE id=?) '
-                'ORDER BY rowid DESC LIMIT 8', (session + ':%', key)).fetchall()
+                'ORDER BY rowid DESC LIMIT 8', (session + ':%', chat, key)).fetchall()
         history = []
         for old_key, user, state, reply in reversed(rows):
             if old_key in self.completed:

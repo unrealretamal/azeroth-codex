@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Azeroth Codex
-## Notes: Optical prompts and checked native-text replies through font metrics.
-## Version: 0.4.7
+## Notes: Optical prompts and checked native-text replies through load-on-demand slots; font fallback retained.
+## Version: 0.5.0
 ## SavedVariables: CodexPixelBridgeState
 ## DefaultState: enabled
 Protocol.lua
@@ -11,6 +11,7 @@ ItemLinks.lua
 Probe.lua
 
 Native.lua
+Slot.lua
 ReplyLinks.lua
 FontProbe.lua
 LateFontProbeConfig.lua

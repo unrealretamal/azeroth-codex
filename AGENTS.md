@@ -10,17 +10,18 @@ The product name is **Azeroth Codex**. The addon folder remains
 
 ## What you are installing
 
-- `addon/CodexPixelBridge/`: native WoW Lua UI and optical/font protocols.
+- `addon/CodexPixelBridge/`: native WoW Lua UI, optical protocol and slot/font reply transports.
 - `companion/`: local Python GUI, screen capture, durable inbox and Codex adapter.
 - `tools/install_addon.py`: the installer. It copies code and creates missing
-  font/image assets without resetting existing resources.
+  load-on-demand reply slots plus font/image assets without resetting existing resources.
 - `Launch Companion.pyw`: optional desktop launcher; uses the repository's
   `state/launcher.json` and native Codex discovery.
 
 The current production bank has **65,535 first-use fonts**. A clean Git checkout
-contains no generated TTF/TGA files. Copying the addon source folder alone is
-not a complete installation. The installer also creates 4,096 legacy image
-placeholders and the fixed diagnostic resources; normal replies use fonts.
+contains no generated TTF/TGA files or reply-slot folders. Copying the addon
+source folder alone is not a complete installation. The installer also creates
+200 load-on-demand reply-slot addons, 4,096 legacy image placeholders and fixed
+diagnostic resources; normal replies use slots and retain fonts as fallback.
 
 ## Boundaries and existing installations
 
@@ -124,7 +125,7 @@ resource files, and changed Lua takes effect only when the user reloads.
 if ($LASTEXITCODE -ne 0) { throw 'Addon installation did not complete.' }
 ```
 
-The installer creates only missing bank slots and can resume after interruption.
+The installer creates only missing reply/font/image slots and can resume after interruption.
 Hard-link groups keep a fresh bank near 2.81 MB of font payload plus filesystem
 metadata; used slots become independent files. If hard links are unavailable,
 report that constraint rather than copying roughly 1.4 GB of fonts or creating
@@ -139,6 +140,7 @@ font filename. This read-only check also constructs the production bridge:
 from pathlib import Path
 import sys
 from companion.native import BANK_SIZE, NativeBridge
+from companion.slots import SLOT_COUNT, inbox_path
 addon = Path(sys.argv[1]).resolve()
 source = Path('addon/CodexPixelBridge')
 for file in source.iterdir():
@@ -149,11 +151,17 @@ present = {file.name for file in addon.iterdir() if file.is_file()}
 missing = expected - present
 assert not missing, f'{len(missing)} font slots are missing'
 NativeBridge(addon)
-print(f'Installed code matches; all {BANK_SIZE:,} font slots are present')
+for number in range(1, SLOT_COUNT + 1):
+    assert inbox_path(addon, number).is_file(), number
+print(f'Installed code matches; all {SLOT_COUNT} reply slots and {BANK_SIZE:,} font slots are present')
 '@ | & $bridgePython - $bridgeAddon
 ```
 
-This verifies disk installation, not live asset discovery or in-game delivery.
+Also verify `CodexPixelBridgeSlot001` through `CodexPixelBridgeSlot200` beside
+the main addon when checking an installation. This verifies disk installation,
+not live asset discovery or in-game delivery. New addon-slot folders require a
+full game restart before WoW can discover them; do not restart WoW without user
+authorization.
 
 ## 4. Configure the companion without losing state
 

@@ -1,4 +1,4 @@
-local _, NS = ...
+local ADDON_NAME, NS = ...
 local panel = CreateFrame('Frame', 'CodexPixelBridgePanel', UIParent, 'BasicFrameTemplateWithInset')
 panel:SetSize(550,740); panel:SetPoint('CENTER'); panel:SetMovable(true); panel:EnableMouse(true)
 panel:RegisterForDrag('LeftButton')
@@ -81,22 +81,47 @@ local session=NS.U32(GetServerTime())..NS.U32(math.floor(GetTime()*1000)%4294967
 local messages, frames, cursor, sequence, elapsed = {}, {}, 1, 0, 0
 local controlTurn=false
 local lastData
+local activeChat='default'
+local function normalizeChat(value)
+    value=tostring(value or ''):lower():gsub('[^a-z0-9_-]','')
+    if value=='' then return 'default' end
+    return value:sub(1,32)
+end
+NS.GetActiveChat=function() return activeChat end
+NS.ChatPrefix=function()
+    -- Preserve protocol bytes for existing default-chat companions.
+    if activeChat=='default' then return '' end
+    return string.char(30)..'chat='..activeChat..string.char(31)
+end
+NS.SetActiveChat=function(value)
+    activeChat=normalizeChat(value)
+    if CodexPixelBridgeState then CodexPixelBridgeState.activeChatV1=activeChat end
+    NS.SetStatus('Active chat: '..activeChat)
+end
+local chatState=CreateFrame('Frame')
+chatState:RegisterEvent('ADDON_LOADED')
+chatState:SetScript('OnEvent',function(_,_,name)
+    if name~=ADDON_NAME then return end
+    CodexPixelBridgeState=CodexPixelBridgeState or {}
+    activeChat=normalizeChat(CodexPixelBridgeState.activeChatV1)
+end)
 local function submit()
     local text=edit:GetText()
     if not text:find('%S') then return end
     if NS.MakePromptText then text=NS.MakePromptText(text) end
-    if #text>1280 then
+    local wire=(NS.ChatPrefix and NS.ChatPrefix() or '')..text
+    if #wire>1280 then
         status:SetText('Message plus item details is too long. Shorten it or link fewer items.');return
     end
     sequence=sequence+1
-    messages[#messages+1]=NS.Encode(text,session,sequence)
+    messages[#messages+1]=NS.Encode(wire,session,sequence)
     if #messages>8 then table.remove(messages,1) end
     frames={}
     for _, group in ipairs(messages) do for _, frame in ipairs(group) do frames[#frames+1]=frame end end
     cursor=1
-    history:AddMessage('You #'..sequence..': '..text:gsub('|','||'))
+    history:AddMessage('You #'..sequence..' ['..activeChat..']: '..text:gsub('|','||'))
     status:SetText('Prompt #'..sequence..' broadcasting. Strip activity means preview checks, not agent progress.')
-    if NS.OnPromptSubmitted then NS.OnPromptSubmitted(sequence) end
+    if NS.OnPromptSubmitted then NS.OnPromptSubmitted(sequence,activeChat) end
     edit:SetText(''); edit:ClearFocus()
 end
 send:SetScript('OnClick',submit); edit:SetScript('OnEnterPressed',submit)
@@ -126,6 +151,10 @@ SlashCmdList.CODEXPIXELBRIDGE=function(arg)
     arg=arg:lower():match('^%s*(.-)%s*$')
     if arg=='show' then panel:Show(); return end
     if arg=='hide' then panel:Hide(); return end
+    if arg=='chat' then NS.SetStatus('Active chat: '..activeChat..'. Use /codex chat <name> to switch.');return end
+    local chat=arg:match('^chat%s+(.+)$')
+    if chat then NS.SetActiveChat(chat);return end
+    if arg=='font' and NS.UseFontReturn then NS.UseFontReturn('Selected with /codex font.');return end
     if arg=='probe' then NS.ShowProbe(); return end
     if arg=='fontprobe' then NS.ShowFontProbe(); return end
     if arg=='latefontprobe' and NS.ShowLateFontProbe then NS.ShowLateFontProbe(); return end

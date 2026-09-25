@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 
 from companion.native import prepare_bank
+from companion.slots import prepare_slots
 from companion.visual import prepare_bank as prepare_images
 from tools.font_probe import packet, write_font
 from tools.probe_session import ASSETS, asset_image
@@ -35,7 +36,10 @@ def install(destination, progress=None):
             shutil.copy2(path,target)
     prepare_diagnostics(destination)
     prepare_images(destination)
-    return prepare_bank(destination,progress=progress)
+    slots = prepare_slots(destination)
+    report = prepare_bank(destination,progress=progress)
+    report['addon_slots'] = slots
+    return report
 
 
 def main():

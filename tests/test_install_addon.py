@@ -23,14 +23,19 @@ class InstallAddonTests(unittest.TestCase):
                     self.assertTrue((destination/name).is_file(),name)
             self.assertEqual(len(list(destination.glob('reply*.tga'))),4096)
             self.assertEqual(len(list(destination.glob('fontprobe*.ttf'))),8)
+            slot = destination.parent/'CodexPixelBridgeSlot001'
+            self.assertTrue((slot/'CodexPixelBridgeSlot001.toc').is_file())
+            self.assertTrue((slot/'Inbox.lua').is_file())
             for name in ASSETS:
                 with Image.open(destination/name) as image: self.assertEqual(image.size,(64,64))
             keep={'fontprobe01.ttf':b'live diagnostic','reply0001.tga':b'live image',
-                  'probe.tga':b'live probe','fontreply0001.ttf':b'live reply'}
+                   'probe.tga':b'live probe','fontreply0001.ttf':b'live reply'}
             for name,body in keep.items(): (destination/name).write_bytes(body)
+            slot_data=slot/'Inbox.lua'; slot_data.write_bytes(b'CodexPixelBridgeSlotData={text="live reply"}\n')
             with patch('tools.install_addon.prepare_bank'):
                 install(destination)
             for name,body in keep.items(): self.assertEqual((destination/name).read_bytes(),body)
+            self.assertEqual(slot_data.read_bytes(), b'CodexPixelBridgeSlotData={text="live reply"}\n')
 
 
 if __name__=='__main__':unittest.main()

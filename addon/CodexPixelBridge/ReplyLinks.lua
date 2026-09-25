@@ -75,7 +75,7 @@ NS.ClearReplyLinks=function()
     current=nil;allowed={};requested={};itemCount=0;dirty=false;hover:Hide()
 end
 NS.DisplayNativeReply=function(text)
-    current=text;render(false)
+    NS.LastNativeReply=text;current=text;render(false)
 end
 body:SetHyperlinksEnabled(true)
 body:SetScript('OnHyperlinkEnter',function(self,data)

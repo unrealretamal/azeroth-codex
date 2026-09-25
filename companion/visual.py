@@ -9,7 +9,7 @@ import time
 import zlib
 
 from PIL import Image, ImageDraw, ImageFont
-from .limits import FONT_BANK_SIZE
+from .limits import ADDON_SLOT_COUNT, FONT_BANK_SIZE
 
 BANK_SIZE = 4096
 BLOCK_SIZE = 32
@@ -35,23 +35,34 @@ def parse_control(frame):
     if len(frame) != 64 or zlib.adler32(frame[:60]) != int.from_bytes(frame[60:], 'big'):
         raise ValueError('Invalid control checksum')
     magic, version, length, part, total, session, message = HEADER.unpack(frame[:20])
-    if magic not in (b'CPBC', b'CPBN') or (version, length, part, total, message) != (2 if magic==b'CPBN' else 1, CONTROL.size, 0, 1, 0):
+    kinds = {
+        b'CPBC': (1, 'image', BANK_SIZE),
+        b'CPBN': (2, 'font', FONT_BANK_SIZE),
+        b'CPBS': (3, 'slot', ADDON_SLOT_COUNT),
+    }
+    expected = kinds.get(magic)
+    if not expected or (version, length, part, total, message) != (expected[0], CONTROL.size, 0, 1, 0):
         raise ValueError('Invalid control header')
     if any(frame[20 + CONTROL.size:60]):
         raise ValueError('Invalid control padding')
     slot, remaining, page, flags, request, loaded = CONTROL.unpack(frame[20:40])
-    capacity = FONT_BANK_SIZE if magic == b'CPBN' else BANK_SIZE
+    _, kind, capacity = expected
     if not 1 <= slot <= capacity + 1 or not 0 <= loaded < slot or loaded != slot - 1:
         raise ValueError('Invalid return slot')
     if not 1 <= page <= 128 or flags not in (0, 1) or not 0 <= remaining <= 6500:
         raise ValueError('Invalid preview control')
     if flags and (slot > capacity or request == 0):
         raise ValueError('Invalid active preview')
-    return Control(session.hex(), slot, remaining, page, bool(flags), request, loaded, 'font' if magic==b'CPBN' else 'image')
+    return Control(session.hex(), slot, remaining, page, bool(flags), request, loaded, kind)
 
 
 def encode_control(session=b'12345678', slot=1, remaining_ms=5000, page=1, active=True, request=1, kind='image'):
-    body = HEADER.pack(b'CPBN' if kind=='font' else b'CPBC', 2 if kind=='font' else 1, CONTROL.size, 0, 1, session, 0)
+    encodings = {'image': (b'CPBC', 1), 'font': (b'CPBN', 2), 'slot': (b'CPBS', 3)}
+    try:
+        magic, version = encodings[kind]
+    except KeyError as exc:
+        raise ValueError('Invalid return transport') from exc
+    body = HEADER.pack(magic, version, CONTROL.size, 0, 1, session, 0)
     body += CONTROL.pack(slot, remaining_ms, page, int(active), request, slot - 1)
     body = body.ljust(60, b'\0')
     frame = body + struct.pack('>I', zlib.adler32(body))
